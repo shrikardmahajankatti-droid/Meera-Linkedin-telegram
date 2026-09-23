@@ -1,118 +1,110 @@
+"""Supabase-backed storage. Replaces the old SQLite layer. Nothing here ever
+deletes a row — notes and drafts are append-only; only score/status/decided_at
+are ever updated in place.
+"""
 from __future__ import annotations
 
-import sqlite3
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Iterator, Optional
+from typing import Optional
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS notes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source TEXT NOT NULL CHECK (source IN ('telegram', 'backlog')),
-    source_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    score INTEGER,
-    keywords TEXT,
-    has_real_specific INTEGER,
-    reason TEXT,
-    used_count INTEGER NOT NULL DEFAULT 0,
-    needs_transcript INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (source, source_id)
-);
+from postgrest.exceptions import APIError
+from supabase import Client, create_client
 
-CREATE TABLE IF NOT EXISTS requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('topic', 'draft')),
-    topic TEXT NOT NULL,
-    matched_note_ids TEXT,
-    created_at TEXT NOT NULL
-);
+from bot.config import Config
 
-CREATE TABLE IF NOT EXISTS ideas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id INTEGER NOT NULL REFERENCES requests(id),
-    idx INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    angle TEXT NOT NULL,
-    note_ids TEXT
-);
-
-CREATE TABLE IF NOT EXISTS drafts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id INTEGER NOT NULL REFERENCES requests(id),
-    note_ids TEXT,
-    news_link TEXT,
-    draft_text TEXT NOT NULL,
-    final_text TEXT,
-    flags TEXT,
-    sent_at TEXT,
-    decided_at TEXT,
-    decision TEXT
-);
-"""
+UNIQUE_VIOLATION = "23505"
 
 
-def connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+def get_client(config: Config) -> Client:
+    return create_client(config.supabase_url, config.supabase_key)
 
 
-def init_db(db_path: str) -> None:
-    conn = connect(db_path)
+def insert_note_if_new(client: Client, *, telegram_update_id: int, chat_id: int, text: str) -> Optional[dict]:
+    """Insert a note, deduplicated on telegram_update_id (so a Telegram retry of
+    the same update never produces a second note or a second draft). Returns
+    the inserted row, or None if this update_id was already processed."""
     try:
-        conn.executescript(SCHEMA)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-@contextmanager
-def cursor(db_path: str) -> Iterator[sqlite3.Cursor]:
-    conn = connect(db_path)
-    try:
-        cur = conn.cursor()
-        yield cur
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def insert_note(
-    db_path: str,
-    *,
-    source: str,
-    source_id: str,
-    text: str,
-    needs_transcript: bool = False,
-) -> Optional[int]:
-    """Insert a note, deduplicated on (source, source_id). Returns the new row id,
-    or None if a note with that (source, source_id) already exists."""
-    with cursor(db_path) as cur:
-        cur.execute(
-            "SELECT id FROM notes WHERE source = ? AND source_id = ?",
-            (source, source_id),
+        res = (
+            client.table("notes")
+            .insert({"telegram_update_id": telegram_update_id, "chat_id": chat_id, "text": text})
+            .execute()
         )
-        if cur.fetchone() is not None:
+    except APIError as exc:
+        if getattr(exc, "code", None) == UNIQUE_VIOLATION:
             return None
-        cur.execute(
-            """
-            INSERT INTO notes (source, source_id, text, created_at, needs_transcript)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (source, source_id, text, now_iso(), int(needs_transcript)),
+        raise
+    return res.data[0]
+
+
+def update_note_score(client: Client, note_id: int, *, score: int, reason: str) -> None:
+    client.table("notes").update({"score": score, "score_reason": reason}).eq("id", note_id).execute()
+
+
+def insert_draft(
+    client: Client,
+    *,
+    note_id: int,
+    draft_text: str,
+    model: str,
+    news_headline: str | None = None,
+    news_source: str | None = None,
+    news_date: str | None = None,
+    news_link: str | None = None,
+) -> dict:
+    res = (
+        client.table("drafts")
+        .insert(
+            {
+                "note_id": note_id,
+                "draft_text": draft_text,
+                "model": model,
+                "news_headline": news_headline,
+                "news_source": news_source,
+                "news_date": news_date,
+                "news_link": news_link,
+                "status": "pending",
+            }
         )
-        return cur.lastrowid
+        .execute()
+    )
+    return res.data[0]
 
 
-def count_notes(db_path: str) -> int:
-    with cursor(db_path) as cur:
-        cur.execute("SELECT COUNT(*) AS c FROM notes")
-        return cur.fetchone()["c"]
+def update_draft_status(client: Client, draft_id: int, *, status: str, decided_at: str) -> None:
+    client.table("drafts").update({"status": status, "decided_at": decided_at}).eq("id", draft_id).execute()
+
+
+def get_voice_skill(client: Client) -> Optional[str]:
+    res = client.table("voice_skill").select("content").order("updated_at", desc=True).limit(1).execute()
+    if not res.data:
+        return None
+    return res.data[0]["content"]
+
+
+def seed_voice_skill(client: Client, content: str) -> None:
+    client.table("voice_skill").insert({"content": content}).execute()
+
+
+def find_best_matching_note(client: Client, *, keywords: list[str], min_score: int | None = None) -> Optional[dict]:
+    """Naive keyword-overlap match over stored notes, most recent first among
+    ties. Used by TRIGGER_MODE=topic. Replaced with proper ranking once
+    scoring (score >= 6 filter) lands."""
+    query = client.table("notes").select("*").order("created_at", desc=True)
+    if min_score is not None:
+        query = query.gte("score", min_score)
+    res = query.execute()
+    rows = res.data or []
+
+    keywords_lower = [k.lower() for k in keywords if k.strip()]
+    if not keywords_lower:
+        return rows[0] if rows else None
+
+    best_row = None
+    best_hits = 0
+    for row in rows:
+        text_lower = (row.get("text") or "").lower()
+        hits = sum(1 for kw in keywords_lower if kw in text_lower)
+        if hits > best_hits:
+            best_hits = hits
+            best_row = row
+
+    return best_row if best_hits > 0 else None
