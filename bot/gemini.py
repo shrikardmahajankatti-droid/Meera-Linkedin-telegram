@@ -4,7 +4,7 @@ from __future__ import annotations
 from google import genai
 from google.genai import types
 
-FLASH_MODEL = "gemini-2.5-flash"
+FLASH_MODEL = "gemini-3.6-flash"
 
 DRAFT_INSTRUCTION = (
     "Write exactly one LinkedIn post grounded only in the note below. "
