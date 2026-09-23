@@ -7,17 +7,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+VALID_TRIGGER_MODES = ("auto", "topic")
+VALID_DRAFT_MODELS = ("gemini", "claude")
+
 
 @dataclass(frozen=True)
 class Config:
     telegram_bot_token: str
+    gemini_api_key: str
+    supabase_url: str
+    supabase_key: str
     notes_channel_id: str
     review_chat_id: str
-    gemini_api_key: str
-    gemini_model: str
-    timezone: str
-    reply_in: str
-    db_path: str
+    trigger_mode: str
+    draft_model: str
+    anthropic_api_key: str
+    telegram_webhook_secret: str
 
     @property
     def review_chat_id_int(self) -> int | None:
@@ -28,22 +33,35 @@ class Config:
         return int(self.notes_channel_id)
 
 
-def load_config() -> Config:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in .env")
+def _require(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is not set in .env")
+    return value
 
-    notes_channel_id = os.environ.get("NOTES_CHANNEL_ID", "").strip()
-    if not notes_channel_id:
-        raise RuntimeError("NOTES_CHANNEL_ID is not set in .env")
+
+def load_config() -> Config:
+    trigger_mode = os.environ.get("TRIGGER_MODE", "auto").strip().lower()
+    if trigger_mode not in VALID_TRIGGER_MODES:
+        raise RuntimeError(f"TRIGGER_MODE must be one of {VALID_TRIGGER_MODES}, got {trigger_mode!r}")
+
+    draft_model = os.environ.get("DRAFT_MODEL", "gemini").strip().lower()
+    if draft_model not in VALID_DRAFT_MODELS:
+        raise RuntimeError(f"DRAFT_MODEL must be one of {VALID_DRAFT_MODELS}, got {draft_model!r}")
+
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if draft_model == "claude" and not anthropic_api_key:
+        raise RuntimeError("DRAFT_MODEL=claude requires ANTHROPIC_API_KEY to be set")
 
     return Config(
-        telegram_bot_token=token,
-        notes_channel_id=notes_channel_id,
+        telegram_bot_token=_require("TELEGRAM_BOT_TOKEN"),
+        gemini_api_key=_require("GEMINI_API_KEY"),
+        supabase_url=_require("SUPABASE_URL"),
+        supabase_key=_require("SUPABASE_KEY"),
+        notes_channel_id=_require("NOTES_CHANNEL_ID"),
         review_chat_id=os.environ.get("REVIEW_CHAT_ID", "").strip(),
-        gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip(),
-        timezone=os.environ.get("TIMEZONE", "Asia/Kolkata").strip(),
-        reply_in=os.environ.get("REPLY_IN", "private").strip().lower(),
-        db_path=os.environ.get("DB_PATH", "skinstinct.db").strip(),
+        trigger_mode=trigger_mode,
+        draft_model=draft_model,
+        anthropic_api_key=anthropic_api_key,
+        telegram_webhook_secret=_require("TELEGRAM_WEBHOOK_SECRET"),
     )
