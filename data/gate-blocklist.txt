@@ -1,0 +1,41 @@
+# Deterministic hard-block list for bot/gate.py.
+# Format: code|phrase   (case-insensitive substring match against the topic/note text)
+# Lines starting with # are comments. Edit freely — no code change needed.
+# Codes must match one of: tragedy, politics_religion, legal_allegation,
+# medical_claim, attack_named_party, no_credible_source.
+# This list only catches obvious, unambiguous cases; the LLM gate call catches
+# subtler ones (e.g. attack_named_party is hard to keyword-match reliably).
+
+tragedy|died
+tragedy|death toll
+tragedy|killed in
+tragedy|mass shooting
+tragedy|plane crash
+tragedy|train crash
+tragedy|earthquake
+tragedy|terror attack
+tragedy|bombing
+tragedy|stampede
+
+politics_religion|election
+politics_religion|general elections
+politics_religion|ruling party
+politics_religion|opposition party
+politics_religion|parliament
+politics_religion|communal violence
+politics_religion|religious conversion
+
+legal_allegation|lawsuit
+legal_allegation|sued
+legal_allegation|class action
+legal_allegation|fined by
+legal_allegation|regulatory notice
+legal_allegation|FDA warning letter
+legal_allegation|recall order
+
+medical_claim|cures cancer
+medical_claim|treats eczema
+medical_claim|cures acne
+medical_claim|diagnose
+medical_claim|prescription strength
+medical_claim|clinically proven to heal

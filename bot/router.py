@@ -18,6 +18,7 @@ _DRAFT_LABEL_RE = re.compile(r"^draft:", re.IGNORECASE)
 _DRAFT_NL_RE = re.compile(r"^(draft|write)\b.*\b(post|linkedin)\b", re.IGNORECASE | re.DOTALL)
 _START_RE = re.compile(r"^/start\b", re.IGNORECASE)
 _HELP_RE = re.compile(r"^/help\b", re.IGNORECASE)
+_OVERRIDE_RE = re.compile(r"^/override\b", re.IGNORECASE)
 
 
 class Classification(str, Enum):
@@ -28,6 +29,7 @@ class Classification(str, Enum):
     REVIEW = "review"
     HELP = "help"
     SETUP = "setup"
+    OVERRIDE = "override"
 
 
 def _is_topic_trigger(text: str) -> bool:
@@ -42,11 +44,15 @@ def _is_draft_trigger(text: str) -> bool:
     )
 
 
+def _is_override_trigger(text: str) -> bool:
+    return bool(_OVERRIDE_RE.match(text))
+
+
 def is_trigger_text(text: str) -> bool:
-    """True if this text is a /topic, /draft, Topic: or Draft: trigger.
-    Used by callers to decide a message must NOT be stored as a note."""
+    """True if this text is a /topic, /draft, /override, Topic: or Draft:
+    trigger. Used by callers to decide a message must NOT be stored as a note."""
     text = text.strip()
-    return _is_topic_trigger(text) or _is_draft_trigger(text)
+    return _is_topic_trigger(text) or _is_draft_trigger(text) or _is_override_trigger(text)
 
 
 def _is_reply_to_edit_prompt(update: Update) -> bool:
@@ -97,6 +103,8 @@ def classify(update: Update, *, review_chat_id: str, notes_channel_id: str) -> C
             return Classification.HELP
         if _is_reply_to_edit_prompt(update):
             return Classification.REVIEW
+        if _is_override_trigger(text):
+            return Classification.OVERRIDE
         if _is_draft_trigger(text):
             return Classification.DRAFT
         if _is_topic_trigger(text):
@@ -104,6 +112,10 @@ def classify(update: Update, *, review_chat_id: str, notes_channel_id: str) -> C
         return Classification.IGNORE
 
     if is_notes_channel:
+        # Overrides only work from the review chat — a stray /override in the
+        # channel is a no-op, not a note and not an override.
+        if _is_override_trigger(text):
+            return Classification.IGNORE
         if _is_draft_trigger(text):
             return Classification.DRAFT
         if _is_topic_trigger(text):
