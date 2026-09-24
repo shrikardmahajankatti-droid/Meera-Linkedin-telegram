@@ -31,7 +31,7 @@ async def run() -> None:
 
     offset = None
     while True:
-        updates = await bot.get_updates(offset=offset, timeout=30, allowed_updates=["message", "channel_post"])
+        updates = await bot.get_updates(offset=offset, timeout=30, allowed_updates=["message", "channel_post", "callback_query"])
         for update in updates:
             offset = update.update_id + 1
             try:

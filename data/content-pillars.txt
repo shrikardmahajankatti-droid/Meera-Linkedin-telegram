@@ -1,0 +1,11 @@
+# Meera's LinkedIn content pillars, derived from data/published/ and
+# data/voice-skill.txt. One pillar per line. Used as the "relevance" rubric
+# in bot/gate.py's LLM prompt — edit freely, no code change needed.
+
+Ingredient mechanisms and formulation chemistry (how actives actually behave, not just what they claim to do)
+pH, stability, and delivery-base effects on whether an active ingredient actually reaches the skin
+Batch manufacturing and quality control (CoA documentation, batch testing, catching drift before it ships)
+Label transparency and what vague industry claims ("clinically tested", "clean") actually mean, or fail to mean
+Founder honesty about mistakes, limitations, and things Skinstinct got wrong or is still learning
+Industry-wide skincare claims literacy, aimed at helping the reader ask better questions of any brand, not just Skinstinct
+The gap between what a skincare label says and what the underlying chemistry or evidence actually supports

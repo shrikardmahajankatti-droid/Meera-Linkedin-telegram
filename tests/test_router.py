@@ -169,4 +169,49 @@ def test_is_trigger_text_helper():
     assert is_trigger_text("/draft idea 2")
     assert is_trigger_text("Draft: sunscreen")
     assert is_trigger_text("write a linkedin post about pH")
+    assert is_trigger_text("/override 5 confirm")
     assert not is_trigger_text("just a normal note about the batch")
+
+
+def test_override_command_in_review_chat():
+    msg = _msg("/override 5 confirm", _private_chat())
+    update = _update_from_message(msg)
+    assert classify_(update) == Classification.OVERRIDE
+
+
+def test_override_command_in_channel_is_ignored_not_a_note():
+    msg = _msg("/override 5", _channel_chat(), is_channel_post=True)
+    update = _update_from_message(msg, is_channel_post=True)
+    result = classify_(update)
+    assert result == Classification.IGNORE
+    assert result != Classification.NOTE
+
+
+def test_callback_from_review_chat_is_review():
+    from telegram import CallbackQuery
+
+    chat = _private_chat()
+    query = CallbackQuery(id="1", from_user=MEERA, chat_instance="ci", data="ovr:5", message=None)
+    update = Update(update_id=1, callback_query=query)
+    # CallbackQuery without a message has no chat; classify() falls back to IGNORE.
+    assert classify_(update) == Classification.IGNORE
+
+
+def test_callback_from_review_chat_with_message_is_review():
+    from telegram import CallbackQuery
+
+    chat = _private_chat()
+    attached_message = _msg("Skipped — ...", chat)
+    query = CallbackQuery(id="1", from_user=MEERA, chat_instance="ci", data="ovr:5", message=attached_message)
+    update = Update(update_id=1, callback_query=query)
+    assert classify_(update) == Classification.REVIEW
+
+
+def test_callback_from_other_chat_is_ignored():
+    from telegram import CallbackQuery
+
+    other_chat = _private_chat(chat_id=777)
+    attached_message = _msg("Skipped — ...", other_chat)
+    query = CallbackQuery(id="1", from_user=STRANGER, chat_instance="ci", data="ovr:5", message=attached_message)
+    update = Update(update_id=1, callback_query=query)
+    assert classify_(update) == Classification.IGNORE
